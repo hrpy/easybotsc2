@@ -1,6 +1,8 @@
 from sc2.bot_ai import BotAI, Race
 from sc2.data import Result
+from sc2.ids.ability_id import AbilityId
 from sc2.ids.unit_typeid import UnitTypeId
+from sc2.ids.upgrade_id import UpgradeId
 
 
 class CompetitiveBot(BotAI):
@@ -13,7 +15,8 @@ class CompetitiveBot(BotAI):
         Race.Protoss
         Race.Random
     """
-
+    proxyPylonCounter: int = 0
+    isAttacking = False
     async def on_start(self):
         """
         This code runs once at the start of the game
@@ -25,10 +28,16 @@ class CompetitiveBot(BotAI):
         await self.distribute_workers()
         await self.build_workers(UnitTypeId.PROBE)
         await self.build_supply_structure(UnitTypeId.PYLON)
+        await self.use_chrono_boost()
         await self.build_barracks()
         await self.build_gas()
         await self.build_cybercore()
         await self.train_stalkers()
+        await self.build_four_gates()
+        await self.research_warpgate()
+        await self.attack()
+        await self.warp_stalkers_to_proxy()
+        await self.build_proxy_pylon()
         pass
 
     async def on_end(self, result: Result):
@@ -106,4 +115,62 @@ class CompetitiveBot(BotAI):
                 gateway.train(UnitTypeId.STALKER)
 
     async def build_four_gates(self):
-        pass
+        if (self.structures(UnitTypeId.WARPGATE).amount + self.structures(UnitTypeId.GATEWAY).amount) < 4:
+            if (
+                self.structures(UnitTypeId.PYLON).ready
+                and self.structures(UnitTypeId.CYBERNETICSCORE).exists
+                and self.can_afford(UnitTypeId.GATEWAY)
+            ):
+                pylon = self.structures(UnitTypeId.PYLON).ready.random
+                await self.build(UnitTypeId.GATEWAY, near=pylon)
+
+    async def research_warpgate(self):
+        if (
+            self.structures(UnitTypeId.CYBERNETICSCORE).ready
+            and self.can_afford(UpgradeId.WARPGATERESEARCH)
+        ):
+            self.research(UpgradeId.WARPGATERESEARCH)
+
+    async def use_chrono_boost(self):
+        if self.structures(UnitTypeId.PYLON):
+            nexus = self.townhalls.ready.random
+            if (
+                not self.structures(UnitTypeId.CYBERNETICSCORE).ready
+                and self.structures(UnitTypeId.PYLON).amount > 0
+                and self.units(UnitTypeId.PROBE).amount < 18
+            ):
+                if nexus.energy >= 50:
+                    nexus(AbilityId.EFFECT_CHRONOBOOSTENERGYCOST, nexus)
+            else:
+                if nexus.energy >= 50 and self.units(UnitTypeId.PROBE).amount > 18:
+                    nexus(AbilityId.EFFECT_CHRONOBOOSTENERGYCOST,
+                          self.structures(UnitTypeId.CYBERNETICSCORE).ready.random)
+
+    async def attack(self):
+        if self.units(UnitTypeId.STALKER).ready.amount > 0:
+            stalkers = self.units(UnitTypeId.STALKER).ready.idle
+
+            for stalker in stalkers:
+                if self.units(UnitTypeId.STALKER).amount > 10:
+                    stalker.attack(self.enemy_start_locations[0])
+                    if not self.isAttacking:
+                        self.isAttacking = True
+
+    async def warp_stalkers_to_proxy(self):
+        for warpgate in self.structures(UnitTypeId.WARPGATE).ready:
+            abilities = await self.get_available_abilities(warpgate)
+            if self.isAttacking:
+                proxyPylon = self.structures(UnitTypeId.PYLON).closest_to(self.enemy_start_locations[0])
+            else:
+                proxyPylon = self.structures(UnitTypeId.PYLON).ready.random
+            if AbilityId.WARPGATETRAIN_STALKER in abilities and self.can_afford(UnitTypeId.STALKER):
+                warpgate.warp_in(UnitTypeId.STALKER, proxyPylon.position.random_on_distance(3))
+
+    async def build_proxy_pylon(self):
+        if (
+            self.proxyPylonCounter < 1
+            and self.isAttacking
+            and self.can_afford(UnitTypeId.PYLON)
+        ):
+            await self.build(UnitTypeId.PYLON, near=self.game_info.map_center.towards(self.enemy_start_locations[0], 20))
+            self.proxyPylonCounter = 1

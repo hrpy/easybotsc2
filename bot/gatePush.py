@@ -1,45 +1,15 @@
-from sc2.bot_ai import BotAI, Race
-from sc2.data import Result
+from sc2.bot_ai import BotAI
 from sc2.ids.ability_id import AbilityId
 from sc2.ids.unit_typeid import UnitTypeId
 from sc2.ids.upgrade_id import UpgradeId
 
 
-class CompetitiveBot(BotAI):
-    NAME: str = "BurningBot"
+class gatePush(BotAI):
 
-    RACE: Race = Race.Terran
-    """
-        Race.Terran
-        Race.Zerg
-        Race.Protoss
-        Race.Random
-    """
+    proxyPylonCounter: int = 0
     isAttacking = False
     isPreparingAttack = False
-    barracksCount: int = 0
-    depotWallCount: int = 0
-    depotWallPos: list = []
-    async def on_start(self):
-        """
-        This code runs once at the start of the game
-        Do things here before the game starts
-        """
-        print("Game started")
-
-    async def on_step(self, iteration: int):
-        await self.distribute_workers()
-        await self.build_workers(UnitTypeId.SCV)
-        await self.build_barracks()
-        await self.build_ramp_depots()
-        pass
-
-    async def on_end(self, result: Result):
-        """
-        This code runs once at the end of the game
-        Do things here after the game ends
-        """
-        print("Game ended.")
+    gatewayCount: int = 0
 
     async def get_workers_count(self):
         worker_count: int = self.workers().count()
@@ -55,58 +25,27 @@ class CompetitiveBot(BotAI):
             nexus.train(workerType)
 
     async def build_supply_structure(self, supply_structure_type):
-        cc = self.townhalls.ready.random
-        position = cc.position.towards(self.enemy_start_locations[0], 10)
-        if self.depotWallCount >= 2:
-            if (
-                self.supply_left < 3
-                and self.supply_cap <= 190
-                and self.already_pending(supply_structure_type) == 0
-                and self.can_afford(supply_structure_type)
-            ):
-                await self.build(supply_structure_type, near=position)
+        nexus = self.townhalls.ready.random
+        position = nexus.position.towards(self.enemy_start_locations[0], 10)
 
-
-    async def build_ramp_depots(self):
-        self.depotWallPos = list(self.main_base_ramp.corner_depots)
         if (
-                self.supply_left < 3
-                and self.can_afford(UnitTypeId.SUPPLYDEPOT)
-                and self.depotWallCount < 2
-                and self.already_pending(UnitTypeId.SUPPLYDEPOT) == 0
+            self.supply_left < 3
+            and self.supply_cap <= 190
+            and self.already_pending(supply_structure_type) == 0
+            and self.can_afford(supply_structure_type)
         ):
-            if self.depotWallCount == 0:
-                await self.build(UnitTypeId.SUPPLYDEPOT, near=self.depotWallPos[0])
-                self.depotWallCount += 1
-                await self.chat_send("building first depot")
-            elif self.depotWallCount == 1:
-                await self.build(UnitTypeId.SUPPLYDEPOT, near=self.depotWallPos[1])
-                self.depotWallCount += 1
-                await self.chat_send("building second depot")
-                await self.chat_send(str(self.depotWallCount))
-        else:
-            await self.build_supply_structure(UnitTypeId.SUPPLYDEPOT)
-
-    async def lower_ramp_depot(self):
-        #get depot closes to main base ramp and lower so marines can pass
-            depot = self.structures(UnitTypeId.SUPPLYDEPOT).closest_to(self, near=self.main_base_ramp.barracks_correct_placement)
-            if (
-                    self.structures(depot).ready
-            ):
-               depot(AbilityId.MORPH_SUPPLYDEPOT_LOWER)
-
+            await self.build(supply_structure_type, near=position)
 
     async def build_barracks(self):
-        if self.barracksCount == 0:
+        if self.gatewayCount == 0:
             if (
-                self.structures(UnitTypeId.SUPPLYDEPOT).ready
-                and self.can_afford(UnitTypeId.BARRACKS)
+                self.structures(UnitTypeId.PYLON).ready
+                and self.can_afford(UnitTypeId.GATEWAY)
             ):
-                barracksPos = self.main_base_ramp.barracks_correct_placement
-                await self.build(UnitTypeId.BARRACKS, near=barracksPos)
-                self.barracksCount += 1
-                await self.chat_send(str(barracksPos))
-                await self.chat_send(str(self.barracksCount))
+                pylon = self.structures(UnitTypeId.PYLON).ready.random
+                await self.build(UnitTypeId.GATEWAY, near=pylon)
+                self.gatewayCount += 1
+                await self.chat_send(str(self.gatewayCount))
 
 
     async def build_gas(self):
@@ -143,7 +82,7 @@ class CompetitiveBot(BotAI):
                 gateway.train(UnitTypeId.STALKER)
 
     async def build_four_gates(self):
-        if self.barracksCount < 4:
+        if self.gatewayCount < 4:
             if (
                 self.structures(UnitTypeId.PYLON).ready
                 and self.structures(UnitTypeId.CYBERNETICSCORE).exists
@@ -151,8 +90,8 @@ class CompetitiveBot(BotAI):
             ):
                 pylon = self.structures(UnitTypeId.PYLON).ready.random
                 await self.build(UnitTypeId.GATEWAY, near=pylon)
-                self.barracksCount += 1
-                await self.chat_send(str(self.barracksCount))
+                self.gatewayCount += 1
+                await self.chat_send(str(self.gatewayCount))
 
     async def research_warpgate(self):
         if (
@@ -203,3 +142,19 @@ class CompetitiveBot(BotAI):
         ):
             await self.build(UnitTypeId.PYLON, near=self.game_info.map_center.towards(self.enemy_start_locations[0], 20))
             self.proxyPylonCounter = 1
+
+    async def executeBO(self):
+        await self.distribute_workers()
+        await self.build_workers(UnitTypeId.PROBE)
+        await self.build_supply_structure(UnitTypeId.PYLON)
+        await self.use_chrono_boost()
+        await self.build_barracks()
+        await self.build_gas()
+        await self.build_cybercore()
+        await self.train_stalkers()
+        await self.build_four_gates()
+        await self.research_warpgate()
+        await self.attack()
+        await self.warp_stalkers_to_proxy()
+        await self.build_proxy_pylon()
+        pass
